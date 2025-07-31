@@ -9,8 +9,8 @@ import json
 from datetime import datetime
 
 # Secret config
-EMAIL_ADDRESS = st.secrets["EMAIL_USER"]
-EMAIL_PASSWORD = st.secrets["EMAIL_PASS"]
+EMAIL_ADDRESS = st.secrets["benithafrancy3@gmail.com"]
+EMAIL_PASSWORD = st.secrets["pfop xyyp mjeh iqaa"]
 GCREDS_JSON = json.loads(st.secrets["GCREDS_JSON"])
 
 # Google Sheet Setup
@@ -83,3 +83,4 @@ if st.button("Analyze Resume"):
 
         st.success(f"✅ {status}! Email sent to {email}")
         st.info(f"Matched Skills: {', '.join(matched_skills)}")
+
