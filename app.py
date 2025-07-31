@@ -43,6 +43,7 @@ def send_email(to_email, candidate_name, result, matched_skills):
         msg = EmailMessage()
         msg["Subject"] = "Resume Evaluation Result"
         msg["From"] = EMAIL_ADDRESS
+        st.write(f"📬 Sending email to: {to_email}")
         msg["To"] = to_email
 
         body = f"""Hi {candidate_name},
