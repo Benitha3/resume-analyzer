@@ -1,0 +1,6 @@
+streamlit
+pandas
+python-dotenv
+PyMuPDF
+gspread
+oauth2client
