@@ -1,86 +1,113 @@
-import streamlit as st
 import os
-import fitz
+import streamlit as st
+import pandas as pd
+import fitz  # PyMuPDF
 import smtplib
 from email.message import EmailMessage
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import json
-from datetime import datetime
+import time
 
-# Secret config
-EMAIL_ADDRESS = st.secrets["benithafrancy3@gmail.com"]
-EMAIL_PASSWORD = st.secrets["pfop xyyp mjeh iqaa"]
-GCREDS_JSON = json.loads(st.secrets["GCREDS_JSON"])
-
-# Google Sheet Setup
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(GCREDS_JSON, scope)
-client = gspread.authorize(creds)
-sheet = client.open("Resume Submissions").worksheet("Submissions")
-
-# Skill list
-required_skills = {
+# ---------- Skill Set ----------
+REQUIRED_SKILLS = {
     "python", "java", "sql", "excel", "power bi", "machine learning", "deep learning",
     "html", "css", "javascript", "django", "communication", "data analysis"
 }
 
-# Email messages
-messages = {
-    "Selected": "Dear {name},\n\nCongratulations! You are shortlisted.\n\nRegards,\nHR Team",
-    "Waiting": "Dear {name},\n\nYour application is under review. We’ll contact you soon.\n\nRegards,\nHR Team",
-    "Rejected": "Dear {name},\n\nUnfortunately, you are not shortlisted. Best wishes!\n\nRegards,\nHR Team"
-}
-
+# ---------- Helper Functions ----------
 def extract_text_from_pdf(uploaded_file):
-    text = ""
-    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-        for page in doc:
-            text += page.get_text()
-    return text.lower()
+    try:
+        text = ""
+        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+            for page in doc:
+                text += page.get_text()
+        return text.lower()
+    except Exception as e:
+        st.error(f"Error reading PDF: {e}")
+        return ""
 
-def analyze_resume(text):
-    matched = [skill for skill in required_skills if skill in text]
+def match_skills(resume_text):
+    matched = [skill for skill in REQUIRED_SKILLS if skill.lower() in resume_text]
     count = len(matched)
     if count >= 6:
-        return "Selected", matched
+        status = "Selected"
     elif 3 <= count < 6:
-        return "Waiting", matched
+        status = "Waiting"
     else:
-        return "Rejected", matched
+        status = "Rejected"
+    return matched, status
 
-def send_email(to, name, status):
-    msg = EmailMessage()
-    msg["Subject"] = "Resume Status – " + status
-    msg["From"] = EMAIL_ADDRESS
-    msg["To"] = to
-    msg.set_content(messages[status].format(name=name))
+def send_email(to_email, candidate_name, result, matched_skills):
+    try:
+        EMAIL_ADDRESS = st.secrets["EMAIL"]["ADDRESS"]
+        EMAIL_PASSWORD = st.secrets["EMAIL"]["PASSWORD"]
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        smtp.send_message(msg)
+        msg = EmailMessage()
+        msg["Subject"] = "Resume Evaluation Result"
+        msg["From"] = EMAIL_ADDRESS
+        msg["To"] = to_email
 
-def save_to_google_sheet(name, email, status, skills):
-    sheet.append_row([name, email, status, ', '.join(skills), str(datetime.now())])
+        body = f"""Hi {candidate_name},
 
-# UI
-st.set_page_config(page_title="Resume Analyzer", page_icon="📄")
-st.title("📄 AI Resume Analyzer + Email Bot 💌")
+Thank you for submitting your resume.
 
-name = st.text_input("Candidate Name")
-email = st.text_input("Candidate Email")
-resume_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+🧠 Skills matched: {', '.join(matched_skills) if matched_skills else 'None'}
+📊 Evaluation Result: {result}
 
-if st.button("Analyze Resume"):
-    if not name or not email or not resume_file:
-        st.warning("Please fill all fields and upload a resume.")
+We appreciate your interest. We’ll be in touch if any suitable opportunity arises.
+
+Regards,  
+ResumeBot Team"""
+
+        msg.set_content(body)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+
+        return True
+    except Exception as e:
+        st.error(f"❌ Email failed to send: {e}")
+        return False
+
+# ---------- Streamlit UI ----------
+st.set_page_config(page_title="AI Resume Analyzer", page_icon="🧠")
+st.title("📄 AI Resume Analyzer with Auto Mail ✉️")
+st.write("Upload your resume PDF and get instant evaluation.")
+
+# Form for input
+with st.form("resume_form"):
+    name = st.text_input("Your Name")
+    email = st.text_input("Your Email")
+    resume = st.file_uploader("Upload Resume (PDF only)", type=["pdf"])
+    submitted = st.form_submit_button("Submit")
+
+if submitted:
+    if not name or not email or not resume:
+        st.warning("Please fill all fields and upload a PDF.")
     else:
-        resume_text = extract_text_from_pdf(resume_file)
-        status, matched_skills = analyze_resume(resume_text)
+        with st.spinner("Analyzing your resume..."):
+            resume_text = extract_text_from_pdf(resume)
+            matched_skills, result = match_skills(resume_text)
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        send_email(email, name, status)
-        save_to_google_sheet(name, email, status, matched_skills)
+            # Save to CSV
+            new_data = pd.DataFrame([{
+                "Timestamp": timestamp,
+                "Name": name,
+                "Email": email,
+                "Matched Skills": ", ".join(matched_skills),
+                "Status": result
+            }])
+            if os.path.exists("scored_resumes.csv"):
+                old_data = pd.read_csv("scored_resumes.csv")
+                all_data = pd.concat([old_data, new_data], ignore_index=True)
+            else:
+                all_data = new_data
+            all_data.to_csv("scored_resumes.csv", index=False)
 
-        st.success(f"✅ {status}! Email sent to {email}")
-        st.info(f"Matched Skills: {', '.join(matched_skills)}")
+            # Send email
+            email_sent = send_email(email, name, result, matched_skills)
 
+            if email_sent:
+                st.success(f"✅ Result: {result}. An email has been sent to {email}.")
+            else:
+                st.error("⚠️ Failed to send email.")
